@@ -62,6 +62,37 @@ const bedroomAudio = new Audio('audio/bedroom.mp3');
 bedroomAudio.loop = true;
 bedroomAudio.volume = 0.5;
 
+// Audio analyser for bass detection
+let audioCtx, analyser, dataArray, audioSource, audioInitialized = false;
+let smoothBass = 0; // Smoothed bass value for less jittery effects
+const BPM = 63; // Set this to match your song's BPM
+
+function initAudioAnalyser() {
+  if (audioInitialized) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  audioSource = audioCtx.createMediaElementSource(bedroomAudio);
+  audioSource.connect(analyser);
+  analyser.connect(audioCtx.destination);
+  dataArray = new Uint8Array(analyser.frequencyBinCount);
+  audioInitialized = true;
+  // Resume audio context (browsers suspend until user interaction)
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function getBassLevel() {
+  if (!analyser) return 0;
+  analyser.getByteFrequencyData(dataArray);
+  // Average the low frequencies (first 8 bins ≈ 0-350Hz)
+  let sum = 0;
+  for (let i = 0; i < 8; i++) sum += dataArray[i];
+  const level = sum / (8 * 255); // Normalize to 0-1
+  // Smooth the bass - fast attack, slower release
+  smoothBass = level > smoothBass ? level : smoothBass * 0.92 + level * 0.08;
+  return smoothBass;
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────
 const mat  = c => new MeshLambertMaterial({ color: c });
 const flat = c => new MeshBasicMaterial({ color: c });
@@ -193,6 +224,7 @@ function buildBedroom() {
   const sc = new Scene();
   sc.background = new Color(0xc08840);
   sc.fog = new FogExp2(0xd0a050, 0.032);
+  sc.userData.baseFogDensity = 0.032;
 
   const W = 5, D = 4, H = 3.5, dW = 1.0, dH = 2.6;
   const flC = 0x7a4e2a, wlC = 0xeacca0, clC = 0xf5e8d0;
@@ -218,8 +250,9 @@ function buildBedroom() {
   addTo(sc, place(box(0.06, 0.1, D*2, bc), -W, 0.05, 0));
 
   // ── Walls ─────────────────────────────────────────────────────
-  addTo(sc, place(box(W*2, H, 0.12, wlC), 0, H/2, -D));  // north
-  addTo(sc, place(box(0.12, H, D*2, wlC), -W, H/2, 0));  // west
+  const wallNorth = addTo(sc, place(box(W*2, H, 0.12, wlC), 0, H/2, -D));
+  const wallWest = addTo(sc, place(box(0.12, H, D*2, wlC), -W, H/2, 0));
+  sc.userData.walls = [wallNorth, wallWest];
 
   // East wall with window
   const wY=1.15, wH=1.85, wZ=2.4; // window bottom y, height, z-span
@@ -264,6 +297,55 @@ function buildBedroom() {
   addTo(sc, place(box(0.1, 0.32, 0.1, 0x3c2010), bx+1.1, 0.14, bz+1.9));   // foot post R
   // Rumpled blanket fold
   addTo(sc, place(box(2.0, 0.1, 0.5, 0xc07850), bx, 0.67, bz+1.6));
+
+  // Bulldog on bed
+  const dogX = bx + 0.5, dogY = 0.65, dogZ = bz + 0.3;
+  const dogColor = 0xe8d4b8, dogDark = 0x8b7355;
+  // Body (stocky)
+  addTo(sc, place(box(0.35, 0.22, 0.45, dogColor), dogX, dogY + 0.11, dogZ));
+  // Legs (stubby)
+  addTo(sc, place(box(0.08, 0.1, 0.08, dogColor), dogX - 0.12, dogY + 0.02, dogZ + 0.15));
+  addTo(sc, place(box(0.08, 0.1, 0.08, dogColor), dogX + 0.12, dogY + 0.02, dogZ + 0.15));
+  addTo(sc, place(box(0.08, 0.1, 0.08, dogColor), dogX - 0.12, dogY + 0.02, dogZ - 0.15));
+  addTo(sc, place(box(0.08, 0.1, 0.08, dogColor), dogX + 0.12, dogY + 0.02, dogZ - 0.15));
+  // Head (big boxy bulldog head) - in a group so we can rotate it
+  const dogHead = new Group();
+  const skull = box(0.28, 0.22, 0.24, dogColor);
+  skull.position.set(0, 0, 0);
+  dogHead.add(skull);
+  // Snout
+  const snout = box(0.14, 0.1, 0.1, dogDark);
+  snout.position.set(0, -0.04, 0.14);
+  dogHead.add(snout);
+  // Nose
+  const nose = box(0.06, 0.04, 0.03, 0x222222);
+  nose.position.set(0, 0, 0.19);
+  dogHead.add(nose);
+  // Eyes
+  const eyeL = box(0.045, 0.045, 0.02, 0x222222);
+  eyeL.position.set(-0.08, 0.04, 0.11);
+  dogHead.add(eyeL);
+  const eyeR = box(0.045, 0.045, 0.02, 0x222222);
+  eyeR.position.set(0.08, 0.04, 0.11);
+  dogHead.add(eyeR);
+  // Ears (floppy)
+  const earL = box(0.07, 0.1, 0.04, dogDark);
+  earL.position.set(-0.14, 0.02, -0.02);
+  earL.rotation.z = 0.3;
+  dogHead.add(earL);
+  const earR = box(0.07, 0.1, 0.04, dogDark);
+  earR.position.set(0.14, 0.02, -0.02);
+  earR.rotation.z = -0.3;
+  dogHead.add(earR);
+  // Position head on body (sitting close to body)
+  dogHead.position.set(dogX, dogY + 0.26, dogZ + 0.25);
+  sc.add(dogHead);
+  // Tail (stubby)
+  addTo(sc, place(box(0.06, 0.06, 0.08, dogColor), dogX, dogY + 0.18, dogZ - 0.26));
+  // Store reference for animation
+  sc.userData.dogHead = dogHead;
+  sc.userData.dogHeadBaseY = dogHead.position.y;
+  sc.userData.dogHeadBaseZ = dogHead.position.z;
 
   // Nightstand
   const nx=bx+1.55, nz=bz-1.35;
@@ -319,19 +401,25 @@ function buildBedroom() {
 
   // ── Lighting ──────────────────────────────────────────────────
 
-  sc.add(new AmbientLight(0xffc870, 1.1));
+  const ambient = new AmbientLight(0xffc870, 1.1);
+  ambient.userData.baseIntensity = 1.1;
+  sc.add(ambient);
 
   const sun = new DirectionalLight(0xffb650, 3.2);
   sun.position.set(W+5, 10, 1);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1024, 1024);
+  sun.userData.baseIntensity = 3.2;
   Object.assign(sun.shadow.camera, { left:-9, right:9, top:9, bottom:-9, near:0.5, far:25 });
   sc.add(sun);
 
   const fill = new PointLight(0xffd890, 1.4, 14, 1);
-  fill.position.set(0, 3.2, 0); sc.add(fill);
+  fill.position.set(0, 3.2, 0);
+  fill.userData.baseIntensity = 1.4;
+  sc.add(fill);
 
   const winLight = new PointLight(0xffe060, 2.8, 6, 1.5);
+  winLight.userData.baseIntensity = 2.8;
   winLight.position.set(W-0.5, wY+wH*0.6, 0); sc.add(winLight);
 
   // Sun shaft
@@ -382,6 +470,7 @@ function goTo(dest) {
     if (dest === 'bedroom') {
       char.x = 0; char.z = 2.6; char.ry = Math.PI;
       roomEl.textContent = 'a sunday afternoon';
+      initAudioAnalyser();
       bedroomAudio.play();
     } else {
       char.x = 0; char.z = -3.2; char.ry = 0;
@@ -465,6 +554,59 @@ function flickerHub() {
   });
 }
 
+function pulseBedroom() {
+  if (scene !== 'bedroom') return;
+  const bass = getBassLevel();
+
+  // Pulse walls
+  if (bedSc.userData.walls) {
+    const wallPulse = 1 + bass * 0.08;
+    bedSc.userData.walls.forEach(wall => {
+      wall.scale.y = wallPulse;
+    });
+  }
+
+  // Bulldog head bop (BPM-based, forward + downward nod)
+  if (bedSc.userData.dogHead) {
+    const head = bedSc.userData.dogHead;
+    const baseY = bedSc.userData.dogHeadBaseY;
+    const baseZ = bedSc.userData.dogHeadBaseZ;
+    // Calculate beat phase (0 to 1) based on BPM
+    const beatHz = BPM / 60;
+    const beat = (clock * beatHz) % 1;
+    // Sharp down, smooth return up (like a human head nod)
+    const nod = beat < 0.15 ? beat / 0.15 : Math.max(0, 1 - (beat - 0.15) / 0.4);
+    // Nod head down (positive X rotation = look down)
+    head.rotation.x = nod * 0.35;
+    // Drop down and push forward when nodding
+    head.position.y = baseY - nod * 0.05;
+    head.position.z = baseZ + nod * 0.08;
+  }
+
+  // Pulse all lights in the bedroom
+  bedSc.children.forEach(c => {
+    if (c.isLight && c.userData.baseIntensity !== undefined) {
+      c.intensity = c.userData.baseIntensity * (1 + bass * 1.5);
+    }
+  });
+
+  // Pulse fog density (thicker on bass hits)
+  if (bedSc.fog && bedSc.userData.baseFogDensity) {
+    bedSc.fog.density = bedSc.userData.baseFogDensity * (1 + bass * 0.8);
+  }
+
+  // Camera shake on strong bass
+  if (bass > 0.3) {
+    const shake = (bass - 0.3) * 0.03;
+    camera.position.x += (Math.random() - 0.5) * shake;
+    camera.position.y += (Math.random() - 0.5) * shake * 0.5;
+  }
+
+  // Subtle FOV pulse
+  camera.fov = 75 + bass * 8;
+  camera.updateProjectionMatrix();
+}
+
 // ─── Loop ────────────────────────────────────────────────────────────
 function loop() {
   requestAnimationFrame(loop);
@@ -473,6 +615,7 @@ function loop() {
   updateCam();
   animateDust();
   flickerHub();
+  pulseBedroom();
   renderer.render(scene === 'hub' ? hubSc : bedSc, camera);
 }
 
