@@ -43,7 +43,6 @@ document.body.appendChild(renderer.domElement);
 // ─── Camera ─────────────────────────────────────────────────────────
 const camera = new PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 60);
 const camTgt = new Vector3();
-char.ry = Math.PI; // start facing north, toward the door
 camera.position.set(0, 1.62, 2);
 camera.lookAt(0, 1.62, -1);
 
@@ -56,7 +55,12 @@ addEventListener('keyup',   e => { keys[e.code] = false; });
 let scene = 'hub';
 let busy  = false;
 let clock = 0;
-const char = { x: 0, z: 2, ry: 0 };
+const char = { x: 0, z: 2, ry: Math.PI };
+
+// ─── Audio ──────────────────────────────────────────────────────────
+const bedroomAudio = new Audio('audio/bedroom.mp3');
+bedroomAudio.loop = true;
+bedroomAudio.volume = 0.5;
 
 // ─── Helpers ────────────────────────────────────────────────────────
 const mat  = c => new MeshLambertMaterial({ color: c });
@@ -378,11 +382,12 @@ function goTo(dest) {
     if (dest === 'bedroom') {
       char.x = 0; char.z = 2.6; char.ry = Math.PI;
       roomEl.textContent = 'a sunday afternoon';
+      bedroomAudio.play();
     } else {
       char.x = 0; char.z = -3.2; char.ry = 0;
       roomEl.textContent = 'the hallway';
+      bedroomAudio.pause();
     }
-    syncChars(0, 0);
     const off = { y: 7.8, dz: 6.2 };
     camera.position.set(char.x, off.y, char.z + off.dz);
     camera.lookAt(char.x, 0.9, char.z);
@@ -397,8 +402,8 @@ function tick() {
   const spd = 0.075, turn = 0.038;
 
   // Left/Right arrows rotate the view
-  if (keys['ArrowLeft']  || keys['KeyA']) char.ry -= turn;
-  if (keys['ArrowRight'] || keys['KeyD']) char.ry += turn;
+  if (keys['ArrowLeft']  || keys['KeyA']) char.ry += turn;
+  if (keys['ArrowRight'] || keys['KeyD']) char.ry -= turn;
 
   // Forward direction from current facing angle
   const fx = Math.sin(char.ry);
